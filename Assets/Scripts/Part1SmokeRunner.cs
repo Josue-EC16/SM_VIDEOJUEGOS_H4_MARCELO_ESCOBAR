@@ -87,6 +87,8 @@ public sealed class Part1SmokeRunner : MonoBehaviour
         Check(Game.coins == 5 && Game.lives == 3 && Mario.big, "Vidas, monedas y tamaño conservados");
         Check(Mario.CaptureState().starSeconds > 7.7f, "La estrella se conserva y pausa durante el fundido");
 
+        yield return VerifySurfaceQueries();
+
         yield return Capture("underground-entry");
         Mario.RestoreState(new PlayerState { big = true });
         Mario.Hit();
@@ -179,6 +181,47 @@ public sealed class Part1SmokeRunner : MonoBehaviour
         Check(FindObjectsByType<GameManager>(FindObjectsSortMode.None).Length == 1 && FindObjectsByType<GameAudio>(FindObjectsSortMode.None).Length == 1,
             "Administradores persistentes sin duplicados");
         Check(FindObjectsByType<AudioListener>(FindObjectsSortMode.None).Length == 1, "Un solo listener tras las transiciones");
+    }
+
+    private IEnumerator VerifySurfaceQueries()
+    {
+        // Escenario aislado de geometría, lejos del mapa, sin scripts de control ni enemigos.
+        GameObject actor = new GameObject("Prueba de consultas", typeof(Rigidbody2D), typeof(CapsuleCollider2D));
+        Rigidbody2D body = actor.GetComponent<Rigidbody2D>();
+        body.gravityScale = 0f;
+        body.constraints = RigidbodyConstraints2D.FreezeAll;
+        body.position = new Vector2(20f, 40f);
+        CapsuleCollider2D capsule = actor.GetComponent<CapsuleCollider2D>();
+        capsule.size = new Vector2(1f, 2f);
+        capsule.offset = new Vector2(0f, 0.5f);
+        GameObject floor = new GameObject("Suelo de prueba", typeof(BoxCollider2D));
+        floor.transform.position = new Vector2(20f, 39f);
+        floor.GetComponent<BoxCollider2D>().size = new Vector2(4f, 1f);
+        Physics2D.SyncTransforms();
+        Check(body.TryGetGround(out _), "La cápsula grande reconoce el suelo");
+        Check(!body.Raycast(Vector2.right) && !body.Raycast(Vector2.left), "El suelo no bloquea el movimiento horizontal");
+        GameObject wall = new GameObject("Pared de prueba", typeof(BoxCollider2D));
+        wall.transform.position = new Vector2(20.77f, 40.5f);
+        wall.GetComponent<BoxCollider2D>().size = new Vector2(0.5f, 4f);
+        Physics2D.SyncTransforms();
+        Check(body.Raycast(Vector2.right), "La pared bloquea en la dirección correcta");
+        floor.GetComponent<BoxCollider2D>().enabled = false;
+        Physics2D.SyncTransforms();
+        Check(!body.TryGetGround(out _), "Una pared lateral no cuenta como suelo");
+        floor.GetComponent<BoxCollider2D>().enabled = true;
+        floor.GetComponent<BoxCollider2D>().isTrigger = true;
+        Physics2D.SyncTransforms();
+        Check(!body.TryGetGround(out _), "Los triggers no sostienen al jugador");
+        floor.GetComponent<BoxCollider2D>().isTrigger = false;
+        capsule.size = Vector2.one;
+        capsule.offset = Vector2.zero;
+        Physics2D.SyncTransforms();
+        Check(body.TryGetGround(out _), "La cápsula pequeña reconoce el mismo suelo");
+        Check(!body.Raycast(Vector2.left), "La forma pequeña no crea una pared fantasma");
+        Destroy(actor);
+        Destroy(floor);
+        Destroy(wall);
+        yield return null;
     }
 
     private IEnumerator Traverse(bool big)

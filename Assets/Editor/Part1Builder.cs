@@ -23,7 +23,6 @@ public static class Part1Builder
         public PipeData[] pipes;
     }
     private const string Variants = "Assets/Prefabs/Underground";
-    private static Material palette;
 
     [MenuItem("Educativo/Parte 1/Regenerar nivel y conexiones")]
     public static void Generate()
@@ -31,15 +30,6 @@ public static class Part1Builder
         if (!Application.isBatchMode && !EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
         AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
         if (!AssetDatabase.IsValidFolder(Variants)) AssetDatabase.CreateFolder("Assets/Prefabs", "Underground");
-        palette = AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/UndergroundPalette.mat");
-        if (palette == null)
-        {
-            palette = new Material(AssetDatabase.LoadAssetAtPath<Shader>("Assets/Shaders/UndergroundPalette.shader"));
-            AssetDatabase.CreateAsset(palette, "Assets/Materials/UndergroundPalette.mat");
-        }
-        // Al regenerar, reparar también cualquier referencia de shader desactualizada.
-        palette.shader = AssetDatabase.LoadAssetAtPath<Shader>("Assets/Shaders/UndergroundPalette.shader");
-        EditorUtility.SetDirty(palette);
         CreateVariants();
         ConfigureOriginal();
         CreateUnderground();
@@ -67,7 +57,7 @@ public static class Part1Builder
         Variant("Brick", "Brick", "UndergroundBrick", obj => obj.GetComponent<BlockHit>().breakable = true);
         Variant("MysteryBlock", "Mystery", null, null);
         Variant("Coin", "Coin", "Coin_Underground", null);
-        Variant("HardBlock", "Hard", null, obj => obj.GetComponent<SpriteRenderer>().sharedMaterial = palette);
+        Variant("HardBlock", "Hard", null, null);
     }
 
     private static void Variant(string source, string name, string sprite, Action<GameObject> configure)
@@ -201,7 +191,8 @@ public static class Part1Builder
         destination.position = new Vector2(215f, 3.5f);
         PipeRegion region = destination.gameObject.AddComponent<PipeRegion>();
         region.cameraBounds = new Vector2(210f, 250f);
-        GameObject mouth = Collider("Tubería de salida (D)", new Vector2(164.2f, 5.75f), new Vector2(0.6f, 1.4f), pipes);
+        GameObject mouth = Collider("Tubería de salida (D)", new Vector2(164.2f, 5.75f), new Vector2(1.6f, 1.4f), pipes);
+        mouth.GetComponent<BoxCollider2D>().offset = new Vector2(0.8f, 0f);
         mouth.GetComponent<BoxCollider2D>().isTrigger = true;
         Pipe exit = mouth.AddComponent<Pipe>();
         exit.connection = destination;
@@ -209,7 +200,10 @@ public static class Part1Builder
         exit.enterDirection = Vector3.right;
         exit.exitDirection = Vector3.up;
         Visual("Conexión de salida", "PipeConnection", new Vector2(166f, 6f), pipes);
-        Collider("Cuerpo de salida", new Vector2(166f, 8f), new Vector2(2f, 12f), pipes);
+        GameObject stem = Visual("Tallo visible de salida", "PipeBottom", new Vector2(167f, 10.25f), pipes);
+        stem.GetComponent<SpriteRenderer>().drawMode = SpriteDrawMode.Tiled;
+        stem.GetComponent<SpriteRenderer>().size = new Vector2(2f, 5.5f);
+        Collider("Cuerpo de salida", new Vector2(167f, 8.75f), new Vector2(2f, 8.5f), pipes);
         EditorSceneManager.SaveScene(scene, "Assets/Scenes/1-2.unity");
     }
 
@@ -217,7 +211,7 @@ public static class Part1Builder
     {
         GameObject obj = Instance(prefab, new Vector2(point.x + 0.5f, point.y + 0.5f), parent);
         SpriteRenderer renderer = obj.GetComponent<SpriteRenderer>();
-        if (point.x < 200) renderer.sharedMaterial = palette;
+        // Conservar el material y los colores del prefab original, incluidos sus fotogramas.
         PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
     }
 

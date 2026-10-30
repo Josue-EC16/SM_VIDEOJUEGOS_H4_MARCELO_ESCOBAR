@@ -10,8 +10,6 @@ public class PlayerMovement : MonoBehaviour
     private Vector2 velocity;
     private float inputAxis;
     private MovingPlatform support;
-    // Default es la capa 0. Una constante evita consultar Unity al deserializar el componente.
-    private const int GroundMask = 1;
     public float moveSpeed = 8f;
     public float maxJumpHeight = 5f;
     public float maxJumpTime = 1f;
@@ -72,10 +70,7 @@ public class PlayerMovement : MonoBehaviour
         if (rb.Raycast(Vector2.right * velocity.x)) velocity.x = 0f;
         if (velocity.x != 0f) transform.eulerAngles = velocity.x > 0f ? Vector3.zero : new Vector3(0f, 180f, 0f);
 
-        Bounds bounds = capsuleCollider.bounds;
-        RaycastHit2D ground = Physics2D.BoxCast(new Vector2(bounds.center.x, bounds.min.y + 0.08f),
-            new Vector2(bounds.size.x * 0.75f, 0.04f), 0f, Vector2.down, 0.18f, GroundMask);
-        grounded = ground.collider != null && !ground.collider.isTrigger && velocity.y <= 0f;
+        grounded = rb.TryGetGround(out RaycastHit2D ground) && velocity.y <= 0f;
         support = grounded && ground.rigidbody != null ? ground.rigidbody.GetComponent<MovingPlatform>() : null;
         if (grounded)
         {
