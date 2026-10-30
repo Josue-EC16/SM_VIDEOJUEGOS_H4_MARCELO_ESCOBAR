@@ -19,6 +19,12 @@ public class PlayerSpriteRenderer : MonoBehaviour
 
     private void LateUpdate()
     {
+        if (movement.swimming && !movement.grounded)
+        {
+            run.enabled = false;
+            spriteRenderer.sprite = Mathf.FloorToInt(Time.time * 6f) % 2 == 0 ? jump : idle;
+            return;
+        }
         run.enabled = movement.running && movement.grounded && !movement.jumping;
 
         if (movement.jumping || movement.falling) {

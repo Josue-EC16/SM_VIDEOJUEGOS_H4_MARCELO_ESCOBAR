@@ -33,13 +33,23 @@ public static class Part1Builder
         CreateVariants();
         ConfigureOriginal();
         CreateUnderground();
+        GameOverBuilder.Create();
+        CampaignBuilder.Generate();
+        RegisterScenes();
+        AssetDatabase.SaveAssets();
+        Debug.Log("PART1_GENERATED: niveles y Game Over conectados.");
+    }
+
+    public static void RegisterScenes()
+    {
         EditorBuildSettings.scenes = new[]
         {
+            new EditorBuildSettingsScene("Assets/Scenes/MainMenu.unity", true),
             new EditorBuildSettingsScene("Assets/Scenes/1-1.unity", true),
-            new EditorBuildSettingsScene("Assets/Scenes/1-2.unity", true)
+            new EditorBuildSettingsScene("Assets/Scenes/1-2.unity", true),
+            new EditorBuildSettingsScene("Assets/Scenes/1-3.unity", true),
+            new EditorBuildSettingsScene("Assets/Scenes/GameOver.unity", true)
         };
-        AssetDatabase.SaveAssets();
-        Debug.Log("PART1_GENERATED: 1-1 y 1-2 conectados.");
     }
 
     private static Sprite Sprite(string name) => AssetDatabase.LoadAssetAtPath<Sprite>($"Assets/Sprites/{name}.png");
@@ -183,7 +193,8 @@ public static class Part1Builder
         FlagPole flag = Instance("Flag Pole", new Vector2(238f, 2f), exterior).GetComponent<FlagPole>();
         flag.castle = castle.transform.Find("Entrance");
         if (flag.castle == null) flag.castle = castle.transform;
-        flag.nextWorld = flag.nextStage = 1;
+        flag.nextWorld = 1;
+        flag.nextStage = 3;
         PrefabUtility.RecordPrefabInstancePropertyModifications(flag);
 
         Transform destination = new GameObject("Destino exterior").transform;

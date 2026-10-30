@@ -10,6 +10,8 @@ public class PlayerMovement : MonoBehaviour
     private Vector2 velocity;
     private float inputAxis;
     private MovingPlatform support;
+    private float strokeDelay;
+    public bool swimming { get; private set; }
     public float moveSpeed = 8f;
     public float maxJumpHeight = 5f;
     public float maxJumpTime = 1f;
@@ -26,6 +28,7 @@ public class PlayerMovement : MonoBehaviour
     internal float simulatedAxis;
     internal bool simulatedJump;
     internal bool simulatedJumpPressed;
+    internal bool simulatedDive;
 #endif
 
     private void Awake()
@@ -41,6 +44,7 @@ public class PlayerMovement : MonoBehaviour
         velocity = Vector2.zero;
         jumping = false;
         support = null;
+        strokeDelay = 0f;
     }
     private void OnDisable()
     {
@@ -56,6 +60,7 @@ public class PlayerMovement : MonoBehaviour
         float axis = Input.GetAxis("Horizontal");
         bool jumpPressed = Input.GetButtonDown("Jump");
         bool jumpHeld = Input.GetButton("Jump");
+        bool diveHeld = Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow);
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
         if (simulatedInput)
         {
@@ -63,15 +68,22 @@ public class PlayerMovement : MonoBehaviour
             jumpPressed = simulatedJumpPressed;
             jumpHeld = simulatedJump;
             simulatedJumpPressed = false;
+            diveHeld = simulatedDive;
         }
 #endif
         inputAxis = axis;
-        velocity.x = Mathf.MoveTowards(velocity.x, axis * moveSpeed, moveSpeed * Time.deltaTime);
-        if (rb.Raycast(Vector2.right * velocity.x)) velocity.x = 0f;
+        float speed = swimming ? 4.5f : moveSpeed;
+        velocity.x = Mathf.MoveTowards(velocity.x, axis * speed, moveSpeed * Time.deltaTime);
+        // La física continua resuelve las paredes sin inmovilizar la cápsula al rozar esquinas.
         if (velocity.x != 0f) transform.eulerAngles = velocity.x > 0f ? Vector3.zero : new Vector3(0f, 180f, 0f);
 
         grounded = rb.TryGetGround(out RaycastHit2D ground) && velocity.y <= 0f;
         support = grounded && ground.rigidbody != null ? ground.rigidbody.GetComponent<MovingPlatform>() : null;
+        if (swimming)
+        {
+            Swim(jumpPressed, jumpHeld || Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow), diveHeld);
+            return;
+        }
         if (grounded)
         {
             velocity.y = Mathf.Max(velocity.y, 0f);
@@ -87,6 +99,30 @@ public class PlayerMovement : MonoBehaviour
         }
         velocity.y += gravity * (velocity.y < 0f || !jumpHeld ? 2f : 1f) * Time.deltaTime;
         velocity.y = Mathf.Max(velocity.y, gravity / 2f);
+    }
+
+    public void SetSwimming(bool value)
+    {
+        if (swimming == value) return;
+        swimming = value;
+        velocity = Vector2.zero;
+        support = null;
+        strokeDelay = 0f;
+    }
+
+    private void Swim(bool pressed, bool held, bool diving)
+    {
+        strokeDelay = Mathf.Max(0f, strokeDelay - Time.deltaTime);
+        if (grounded) velocity.y = Mathf.Max(0f, velocity.y);
+        if (!diving && (pressed || held) && strokeDelay <= 0f)
+        {
+            velocity.y = 4.5f;
+            strokeDelay = 0.28f;
+            GameAudio.Instance?.Play(SoundEffect.Swim);
+        }
+        velocity.y -= (diving ? 16f : 8f) * Time.deltaTime;
+        velocity.y = Mathf.Max(velocity.y, diving ? -3.5f : -2.5f);
+        jumping = velocity.y > 0.1f;
     }
     private void FixedUpdate()
     {

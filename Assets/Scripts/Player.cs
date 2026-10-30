@@ -23,10 +23,12 @@ public class Player : MonoBehaviour
     private float starSeconds;
     private float damageProtection;
     private Coroutine scaleAnimation;
+    private const float ColliderWidth = 0.8f;
 
     private void Awake()
     {
         capsuleCollider = GetComponent<CapsuleCollider2D>();
+        capsuleCollider.size = new Vector2(ColliderWidth, capsuleCollider.size.y);
         movement = GetComponent<PlayerMovement>();
         deathAnimation = GetComponent<DeathAnimation>();
         big = bigRenderer.enabled;
@@ -104,7 +106,8 @@ public class Player : MonoBehaviour
     private void ApplySize(bool value)
     {
         big = value;
-        capsuleCollider.size = new Vector2(1f, value ? 2f : 1f);
+        // Dejar margen respecto al sprite de un bloque evita encajarse entre paredes contiguas.
+        capsuleCollider.size = new Vector2(ColliderWidth, value ? 2f : 1f);
         capsuleCollider.offset = new Vector2(0f, value ? 0.5f : 0f);
         smallRenderer.enabled = !value;
         bigRenderer.enabled = value;

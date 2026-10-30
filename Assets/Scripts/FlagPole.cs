@@ -10,6 +10,7 @@ public class FlagPole : MonoBehaviour
     public float speed = 6f;
     public int nextWorld = 1;
     public int nextStage = 1;
+    public bool finishGame;
     private bool completing;
 
     private void OnTriggerEnter2D(Collider2D other)
@@ -32,7 +33,8 @@ public class FlagPole : MonoBehaviour
         // Se mantienen los datos del jugador disponibles para capturar su estado.
         foreach (SpriteRenderer renderer in player.GetComponentsInChildren<SpriteRenderer>()) renderer.enabled = false;
         yield return new WaitForSeconds(2f);
-        GameManager.Instance.LoadLevel(nextWorld, nextStage);
+        if (finishGame) GameManager.Instance.ShowMainMenu(true);
+        else GameManager.Instance.LoadLevel(nextWorld, nextStage);
     }
 
     private IEnumerator MoveTo(Transform subject, Vector3 position)

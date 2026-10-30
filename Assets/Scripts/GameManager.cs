@@ -13,6 +13,9 @@ public class GameManager : MonoBehaviour
     public int coins { get; private set; }
     public bool IsTransitioning { get; private set; }
     public bool IsResetPending { get; private set; }
+    public bool IsGameOver => SceneManager.GetActiveScene().name == "GameOver";
+    public bool IsMainMenu => SceneManager.GetActiveScene().name == "MainMenu";
+    public bool CompletedRun { get; private set; }
     private SceneTransition transition;
     private PlayerState pendingState;
     private bool restoreState;
@@ -48,6 +51,8 @@ public class GameManager : MonoBehaviour
     {
         LevelSettings settings = FindFirstObjectByType<LevelSettings>();
         if (settings != null) { world = settings.world; stage = settings.stage; settings.Apply(); }
+        if (IsGameOver) GameAudio.Instance?.StopMusic();
+        else if (IsMainMenu) GameAudio.Instance?.SetTheme(MusicTheme.Menu);
         Player player = FindFirstObjectByType<Player>();
         if (player != null && restoreState) player.RestoreState(pendingState);
         // sceneLoaded ocurre antes del primer Update del jugador recién creado.
@@ -55,18 +60,53 @@ public class GameManager : MonoBehaviour
         restoreState = false;
     }
 
-    public void NewGame()
+    public void NewGame() => StartGameAt(1);
+
+    /// <summary>La selección de nivel inicia una partida limpia, sin estados de otra sesión.</summary>
+    public void StartGameAt(int level)
+    {
+        if (IsTransitioning || level < 1 || level > 3) return;
+        CancelInvoke(nameof(ResetLevel));
+        IsResetPending = false;
+        CompletedRun = false;
+        lives = 3;
+        coins = 0;
+        BeginLoad(1, level, default);
+    }
+
+    public void ShowMainMenu(bool completed = false)
     {
         if (IsTransitioning) return;
         CancelInvoke(nameof(ResetLevel));
         IsResetPending = false;
-        lives = 3;
-        coins = 0;
-        BeginLoad(1, 1, default);
+        CompletedRun = completed;
+        BeginLoadScene("MainMenu", default);
     }
 
-    // La escena de Game Over se incorporar? en la tercera parte.
-    public void GameOver() => NewGame();
+    private void Update()
+    {
+        if (!IsMainMenu && !IsGameOver && !IsTransitioning && !IsResetPending && Input.GetKeyDown(KeyCode.Escape))
+            ShowMainMenu();
+    }
+
+    public void QuitGame()
+    {
+        if (IsTransitioning) return;
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
+        Application.Quit(0);
+#endif
+    }
+
+    /// <summary>Conserva el resultado hasta que el jugador pulse Volver a intentar.</summary>
+    public void GameOver()
+    {
+        if (IsTransitioning || IsGameOver) return;
+        CancelInvoke(nameof(ResetLevel));
+        IsResetPending = false;
+        BeginLoadScene("GameOver", default);
+    }
 
     public void LoadLevel(int world, int stage)
     {
@@ -77,7 +117,11 @@ public class GameManager : MonoBehaviour
 
     private void BeginLoad(int nextWorld, int nextStage, PlayerState state)
     {
-        string sceneName = $"{nextWorld}-{nextStage}";
+        BeginLoadScene($"{nextWorld}-{nextStage}", state);
+    }
+
+    private void BeginLoadScene(string sceneName, PlayerState state)
+    {
         if (!Application.CanStreamedLevelBeLoaded(sceneName))
         {
             Debug.LogError($"La escena {sceneName} no est? registrada en la compilaci?n.");

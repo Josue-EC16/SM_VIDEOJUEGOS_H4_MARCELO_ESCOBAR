@@ -6,6 +6,8 @@ using System.IO;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.EventSystems;
+using UnityEngine.UI;
 
 /// <summary>Pruebas optativas del ejecutable: sólo se activan con -part1Smoke.</summary>
 public sealed class Part1SmokeRunner : MonoBehaviour
@@ -17,7 +19,7 @@ public sealed class Part1SmokeRunner : MonoBehaviour
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void Bootstrap()
     {
-        if (!Environment.GetCommandLineArgs().Contains("-part1Smoke")) return;
+        if (!Environment.GetCommandLineArgs().Contains("-part1Smoke") && !Environment.GetCommandLineArgs().Contains("-menuQuitSmoke") && !Environment.GetCommandLineArgs().Contains("-routeSmoke") && !Environment.GetCommandLineArgs().Contains("-aquaticSmoke")) return;
         Application.SetStackTraceLogType(LogType.Log, StackTraceLogType.None);
         GameObject obj = new GameObject("Verificación automática parte 1");
         DontDestroyOnLoad(obj);
@@ -31,9 +33,56 @@ public sealed class Part1SmokeRunner : MonoBehaviour
         Application.logMessageReceived += OnLog;
         StartCoroutine(Watchdog());
         yield return null;
-        yield return Run();
-        File.WriteAllLines(Path.Combine(output, "playmode-results.txt"), results);
+        bool menuQuit = Environment.GetCommandLineArgs().Contains("-menuQuitSmoke");
+        if (menuQuit) { yield return null; Check(Game.IsMainMenu, "Salir se prueba desde el menú inicial"); }
+        else if (Environment.GetCommandLineArgs().Contains("-aquaticSmoke"))
+        {
+            Game.StartGameAt(3); yield return WaitForLoad();
+            yield return VerifySwimming();
+            foreach (bool big in new[] { false, true })
+            {
+                Game.StartGameAt(3); yield return WaitForLoad();
+                Mario.RestoreState(new PlayerState { big = big, starSeconds = 10 });
+                yield return TraverseWater(big);
+            }
+            Game.GameOver(); yield return WaitForLoad(); yield return null;
+        }
+        else if (Environment.GetCommandLineArgs().Contains("-routeSmoke"))
+        {
+            yield return Traverse(false); yield return Traverse(true);
+            Game.GameOver(); yield return WaitForLoad(); yield return null;
+        }
+        else yield return Run();
+        GameOverMenu menu = FindFirstObjectByType<GameOverMenu>();
+        MainMenuController home = FindFirstObjectByType<MainMenuController>();
+        Button exitButton = menuQuit && home != null ? home.exitButton : menu != null ? menu.exitButton : null;
+        PointerEventData exitPointer = null;
+        if (!failed && exitButton != null)
+        {
+            Canvas.ForceUpdateCanvases();
+            exitPointer = new PointerEventData(EventSystem.current)
+            {
+                position = RectTransformUtility.WorldToScreenPoint(null, exitButton.transform.position),
+                button = PointerEventData.InputButton.Left
+            };
+            List<RaycastResult> hits = new List<RaycastResult>();
+            EventSystem.current.RaycastAll(exitPointer, hits);
+            Check(hits.Any(h => h.gameObject == exitButton.gameObject), "Salir recibe el clic del ratón");
+        }
+        string report = menuQuit ? "menu-quit-results.txt" : Environment.GetCommandLineArgs().Contains("-aquaticSmoke") ? "aquatic-results.txt"
+            : Environment.GetCommandLineArgs().Contains("-routeSmoke") ? "route-results.txt" : "playmode-results.txt";
+        File.WriteAllLines(Path.Combine(output, report), results);
         Debug.Log(failed ? "PART1_SMOKE_FAILED" : "PART1_SMOKE_OK");
+        if (!failed && exitButton != null)
+        {
+            Debug.Log(menuQuit ? "MAIN_MENU_EXIT_BUTTON_TEST" : "GAME_OVER_EXIT_BUTTON_TEST");
+            ExecuteEvents.Execute(exitButton.gameObject, exitPointer, ExecuteEvents.pointerClickHandler);
+            yield return new WaitForSecondsRealtime(3f);
+            results.Add("FAIL: el botón Salir no cerró el ejecutable");
+            File.WriteAllLines(Path.Combine(output, report), results);
+            Application.Quit(1);
+            yield break;
+        }
         Application.logMessageReceived -= OnLog;
         Application.Quit(failed ? 1 : 0);
     }
@@ -51,7 +100,7 @@ public sealed class Part1SmokeRunner : MonoBehaviour
 
     private IEnumerator Watchdog()
     {
-        yield return new WaitForSecondsRealtime(240f);
+        yield return new WaitForSecondsRealtime(360f);
         results.Add("FAIL: tiempo máximo de pruebas excedido");
         File.WriteAllLines(Path.Combine(output, "playmode-results.txt"), results);
         Application.Quit(1);
@@ -77,6 +126,7 @@ public sealed class Part1SmokeRunner : MonoBehaviour
 
     private IEnumerator Run()
     {
+        yield return VerifyMenus();
         Check(Game.stage == 1 && Game.lives == 3, "Inicio normal en 1-1");
         for (int i = 0; i < 5; i++) Game.AddCoin();
         Mario.RestoreState(new PlayerState { big = true, starSeconds = 8f });
@@ -165,7 +215,10 @@ public sealed class Part1SmokeRunner : MonoBehaviour
         PlaceMario(new Vector2(flag.transform.position.x + 0.1f, flag.transform.position.y + 6f));
         yield return new WaitForSeconds(7f);
         yield return WaitForLoad();
-        Check(Game.stage == 1 && Game.lives == 2 && Game.coins == 5, "Bandera de 1-2: regreso a 1-1 con progreso");
+        Check(Game.stage == 3 && Game.lives == 2 && Game.coins == 5 && Mario.movement.swimming, "Bandera de 1-2: continuación a 1-3 con progreso");
+        yield return VerifySwimming();
+        Game.LoadLevel(1, 1);
+        yield return WaitForLoad();
 
         Mario.RestoreState(default);
         Mario.Fall();
@@ -175,12 +228,182 @@ public sealed class Part1SmokeRunner : MonoBehaviour
         Mario.Death();
         yield return new WaitForSeconds(4f);
         yield return WaitForLoad();
-        Check(Game.lives == 3 && Game.coins == 0 && Game.stage == 1, "Fin de vidas conserva el reinicio provisional");
+        Check(Game.IsGameOver && Game.lives == 0 && Mario == null, "Perder todas las vidas carga Game Over");
+        GameOverMenu gameOver = FindFirstObjectByType<GameOverMenu>();
+        Check(gameOver != null && FindObjectsByType<Button>(FindObjectsSortMode.None).Length == 2, "Game Over tiene únicamente Reintentar y Salir");
+        yield return null;
+        Check(EventSystem.current.currentSelectedGameObject == gameOver.retryButton.gameObject, "El teclado selecciona Volver a intentar");
+        ExecuteEvents.Execute(gameOver.retryButton.gameObject, new AxisEventData(EventSystem.current) { moveDir = MoveDirection.Down }, ExecuteEvents.moveHandler);
+        Check(EventSystem.current.currentSelectedGameObject == gameOver.exitButton.gameObject, "Flecha abajo selecciona Salir");
+        ExecuteEvents.Execute(gameOver.exitButton.gameObject, new AxisEventData(EventSystem.current) { moveDir = MoveDirection.Up }, ExecuteEvents.moveHandler);
+        Check(EventSystem.current.currentSelectedGameObject == gameOver.retryButton.gameObject, "Flecha arriba vuelve a Reintentar");
+        yield return Capture("game-over");
+        ExecuteEvents.Execute(gameOver.retryButton.gameObject, new BaseEventData(EventSystem.current), ExecuteEvents.submitHandler);
+        gameOver.retryButton.onClick.Invoke(); // Una segunda petición durante el fundido se ignora.
+        yield return WaitForLoad();
+        Check(Game.lives == 3 && Game.coins == 0 && Game.world == 1 && Game.stage == 1 && !Mario.big && !Mario.starpower,
+            "Volver a intentar reinicia toda la partida en 1-1");
         yield return Traverse(false);
         yield return Traverse(true);
         Check(FindObjectsByType<GameManager>(FindObjectsSortMode.None).Length == 1 && FindObjectsByType<GameAudio>(FindObjectsSortMode.None).Length == 1,
             "Administradores persistentes sin duplicados");
         Check(FindObjectsByType<AudioListener>(FindObjectsSortMode.None).Length == 1, "Un solo listener tras las transiciones");
+        Game.GameOver();
+        yield return WaitForLoad();
+        yield return null;
+        Check(Game.IsGameOver, "La escena final está preparada para verificar el botón Salir");
+    }
+
+    private static void Submit(Button button) => ExecuteEvents.Execute(button.gameObject,
+        new BaseEventData(EventSystem.current), ExecuteEvents.submitHandler);
+
+    private IEnumerator VerifyMenus()
+    {
+        yield return null;
+        Check(Game.IsMainMenu && Mario == null, "El ejecutable inicia en el menú principal");
+        MainMenuController menu = FindFirstObjectByType<MainMenuController>();
+        Check(FindObjectsByType<Button>(FindObjectsSortMode.None).Length == 3, "Inicio: Jugar, Elegir nivel y Salir");
+        Check(EventSystem.current.currentSelectedGameObject == menu.playButton.gameObject, "Jugar tiene el foco inicial");
+        Check(Game.GetComponents<AudioSource>().Any(a => a.isPlaying && a.clip != null && a.clip.name == "Menu"), "El menú reproduce su música");
+        yield return Capture("main-menu");
+        for (int stage = 1; stage <= 3; stage++)
+        {
+            menu = FindFirstObjectByType<MainMenuController>();
+            Submit(menu.chooseButton);
+            yield return null;
+            Check(menu.levelPanel.activeSelf && !menu.mainPanel.activeSelf && FindObjectsByType<Button>(FindObjectsSortMode.None).Length == 4,
+                "Selector con tres niveles y Volver");
+            if (stage == 1)
+            {
+                yield return Capture("level-selector");
+                Submit(menu.backButton);
+                Check(menu.mainPanel.activeSelf && EventSystem.current.currentSelectedGameObject == menu.playButton.gameObject, "Volver restaura el panel y el foco");
+                Submit(menu.chooseButton);
+            }
+            Submit(stage == 1 ? menu.level1Button : stage == 2 ? menu.level2Button : menu.level3Button);
+            yield return WaitForLoad();
+            Check(Game.stage == stage && Game.lives == 3 && Game.coins == 0 && !Mario.big && !Mario.starpower,
+                "Selección 1-" + stage + ": partida nueva y escena correcta");
+            Check(Mario.movement.swimming == (stage == 3), "Movimiento apropiado al seleccionar 1-" + stage);
+            if (stage == 3)
+            {
+                var fish = FindFirstObjectByType<AquaticEnemy>();
+                PlaceMario(fish.transform.position);
+                yield return new WaitForSeconds(.15f);
+                Check(Mario.dead, "Un pez puede derrotar a Mario pequeño");
+                yield return new WaitForSeconds(3.8f);
+                yield return WaitForLoad();
+                Check(Game.stage == 3 && Game.lives == 2 && Mario.movement.swimming && !Mario.dead,
+                    "La muerte acuática descuenta una vida y reinicia 1-3 nadando");
+            }
+            Game.AddCoin(); Game.AddLife(); Mario.RestoreState(new PlayerState { big = true, starSeconds = 5 });
+            Game.ShowMainMenu();
+            yield return WaitForLoad();
+            yield return null;
+        }
+        menu = FindFirstObjectByType<MainMenuController>();
+        Submit(menu.playButton);
+        menu.playButton.onClick.Invoke();
+        yield return WaitForLoad();
+        Check(Game.stage == 1 && Game.lives == 3 && Game.coins == 0 && !Mario.big && !Mario.starpower, "Jugar reinicia desde 1-1 y bloquea doble clic");
+    }
+
+    private IEnumerator VerifySwimming()
+    {
+        Mario.RestoreState(default);
+        PlaceMario(new Vector2(5, 6));
+        PlayerMovement movement = Mario.movement;
+        yield return null;
+        Check(Game.GetComponents<AudioSource>().Any(a => a.isPlaying && a.clip != null && a.clip.name == "Underwater"), "El agua reproduce su música");
+        movement.simulatedInput = true; movement.simulatedJump = true;
+        yield return new WaitForSeconds(.6f);
+        Check(Mario.transform.position.y > 7.4f, "Nadar asciende con brazadas repetidas");
+        float high = Mario.transform.position.y;
+        movement.simulatedJump = false;
+        yield return new WaitForSeconds(1.5f);
+        Check(Mario.transform.position.y < high - .5f, "Sin brazadas Mario desciende lentamente");
+        float beforeDive = Mario.transform.position.y;
+        movement.simulatedDive = true;
+        yield return new WaitForSeconds(.6f);
+        Check(Mario.transform.position.y < beforeDive - 1.5f, "Bajar permite una inmersión más rápida");
+        PlaceMario(new Vector2(5, 11.5f));
+        movement.simulatedDive = false; movement.simulatedJump = true;
+        yield return new WaitForSeconds(1f);
+        Check(Mario.capsuleCollider.bounds.max.y <= 13.1f, "El techo acuático retiene al jugador");
+        Mario.RestoreState(new PlayerState { big = true });
+        PlaceMario(new Vector2(5, 3));
+        movement.simulatedJump = false; movement.simulatedDive = true;
+        yield return new WaitForSeconds(.7f);
+        Check(Mario.capsuleCollider.bounds.min.y >= 1.98f, "Suelo acuático sólido con Mario grande");
+        PlaceMario(new Vector2(5, 11.4f));
+        movement.simulatedDive = false; movement.simulatedJump = true;
+        yield return new WaitForSeconds(.6f);
+        Check(Mario.capsuleCollider.bounds.max.y <= 13.1f, "El techo también retiene a Mario grande");
+        movement.simulatedInput = false; movement.simulatedDive = false;
+        var fish = FindObjectsByType<AquaticEnemy>(FindObjectsSortMode.None).OrderBy(f => f.transform.position.x).First();
+        PlaceMario(fish.transform.position);
+        yield return new WaitForSeconds(.25f);
+        Check(!Mario.big && !Mario.dead, "Un pez reduce a Mario grande y protege de impactos repetidos");
+        Mario.RestoreState(new PlayerState { starSeconds = 10 });
+        PlaceMario(fish.transform.position);
+        yield return new WaitForSeconds(.15f);
+        Check(fish == null && !Mario.dead && FindObjectsByType<AquaticEnemy>(FindObjectsSortMode.None).Length == 3, "La estrella derrota al pez sin dañar a Mario");
+        int beforeCoin = Game.coins;
+        var coin = FindObjectsByType<PowerUp>(FindObjectsSortMode.None).First(p => p.type == PowerUp.Type.Coin);
+        PlaceMario(coin.transform.position);
+        yield return new WaitForSeconds(.1f);
+        Check(coin == null && Game.coins == (beforeCoin + 1) % 100, "Las monedas acuáticas se recogen por contacto");
+        PlaceMario(new Vector2(34, 8));
+        yield return Capture("aquatic-middle");
+        Pipe exit = FindFirstObjectByType<Pipe>();
+        PlaceMario(new Vector2(66.5f, 2.51f));
+        Check(exit.TryEnter(Mario), "La boca acuática admite a Mario pequeño junto al suelo");
+        yield return WaitForPipe();
+        Check(Mario.transform.position.x > 78 && !movement.swimming, "La entrada baja llega al exterior con física terrestre");
+        // La ruta física se verifica más abajo desde el punto de aparición, con ambos tamaños.
+    }
+
+    private IEnumerator TraverseWater(bool big)
+    {
+        Player player = Mario;
+        PlayerMovement movement = player.movement;
+        movement.simulatedInput = true; movement.simulatedAxis = 1;
+        float timeout = Time.realtimeSinceStartup + 35;
+        float refresh = Time.time + 5;
+        bool captured = false;
+        var pipe = FindFirstObjectByType<Pipe>();
+        while (!player.dead && !player.IsTransitioning && Time.realtimeSinceStartup < timeout)
+        {
+            float x = player.transform.position.x, y = player.transform.position.y;
+            movement.simulatedJump = x < 60 && y < 9.5f;
+            movement.simulatedDive = x >= 60 && y > 3.7f;
+            if (x > 64) pipe.TryEnter(player);
+            if (!captured && x > 30)
+            {
+                captured = true;
+                yield return Capture(big ? "aquatic-route-big" : "aquatic-route-small");
+            }
+            if (Time.time > refresh) { player.Starpower(); refresh = Time.time + 5; }
+            yield return null;
+        }
+        movement.simulatedInput = false; movement.simulatedDive = false; movement.simulatedJump = false;
+        Check(player.IsTransitioning && !player.dead, "Recorrido físico acuático con Mario " + (big ? "grande" : "pequeño"));
+        yield return WaitForPipe();
+        Check(player.transform.position.x > 78 && !movement.swimming && player.big == big, "Tubería acuática restaura movimiento terrestre y conserva tamaño");
+        yield return Capture(big ? "aquatic-exit-big" : "aquatic-exit-small");
+        yield return DriveTo(101, 18);
+        if (player != null && !player.IsTransitioning)
+        {
+            // Frenar sobre el mástil permite caer en su trigger aunque el salto de la escalera lo sobrepase en altura.
+            movement.simulatedInput = true;
+            yield return ArriveAt(player, 104);
+            movement.simulatedInput = false;
+        }
+        timeout = Time.realtimeSinceStartup + 10;
+        while (!Game.IsMainMenu && Time.realtimeSinceStartup < timeout) yield return null;
+        yield return WaitForLoad();
+        Check(Game.IsMainMenu && Game.CompletedRun && Mario == null, "Bandera final completa los tres niveles y vuelve al menú");
+        yield return Capture(big ? "campaign-completed-big" : "campaign-completed-small");
     }
 
     private IEnumerator VerifySurfaceQueries()
@@ -226,10 +449,12 @@ public sealed class Part1SmokeRunner : MonoBehaviour
 
     private IEnumerator Traverse(bool big)
     {
+        if (Game.IsResetPending) { yield return new WaitForSeconds(4); yield return WaitForLoad(); }
         Game.LoadLevel(1, 2);
         yield return WaitForLoad();
         Mario.RestoreState(new PlayerState { big = big, starSeconds = 10f });
-        yield return DriveTo(163.5f, 65f);
+        if (Environment.GetCommandLineArgs().Contains("-elevatorStart")) PlaceMario(new Vector2(136.1f, 5.5f));
+        yield return DriveTo(163.5f, 90f);
         bool reached = !Mario.dead && Mario.transform.position.x >= 163.3f;
         Check(reached, "Recorrido físico completo del subsuelo con Mario " + (big ? "grande" : "pequeño"));
         if (!reached) { yield return Capture(big ? "route-big-failure" : "route-small-failure"); yield break; }
@@ -240,7 +465,8 @@ public sealed class Part1SmokeRunner : MonoBehaviour
         float timeout = Time.realtimeSinceStartup + 8f;
         while (Game.stage == 2 && Time.realtimeSinceStartup < timeout) yield return null;
         yield return WaitForLoad();
-        Check(Game.stage == 1, "Escalera y bandera superadas con Mario " + (big ? "grande" : "pequeño"));
+        Check(Game.stage == 3 && Mario.big == big && Mario.movement.swimming, "Escalera y bandera conectan con el agua conservando tamaño: " + (big ? "grande" : "pequeño"));
+        if (Game.stage == 3) yield return TraverseWater(big);
     }
 
     private IEnumerator DriveTo(float destination, float seconds)
@@ -255,10 +481,22 @@ public sealed class Part1SmokeRunner : MonoBehaviour
         float bestX = player.transform.position.x;
         float lastProgress = Time.realtimeSinceStartup;
         bool preparedFirstPit = false;
-        while (player != null && !player.dead && !player.IsTransitioning && (destination < 200f || player.transform.position.x < destination) && Time.realtimeSinceStartup < timeout)
+        bool crossedElevators = false;
+        bool subsurface = Game.stage == 2 && destination < 200f;
+        while (player != null && !player.dead && !player.IsTransitioning && (subsurface || player.transform.position.x < destination) && Time.realtimeSinceStartup < timeout)
         {
             Bounds bounds = player.capsuleCollider.bounds;
-            if (destination < 200f && player.big && !preparedFirstPit && player.transform.position.x > 74f && player.transform.position.x < 80f)
+            if (subsurface && !crossedElevators && player.transform.position.x > 136 && player.transform.position.x < 139)
+            {
+                crossedElevators = true;
+                yield return CrossElevators(player);
+                movement.simulatedAxis = 1;
+                movement.simulatedJump = true;
+                bestX = player.transform.position.x;
+                lastProgress = Time.realtimeSinceStartup;
+                continue;
+            }
+            if (subsurface && player.big && !preparedFirstPit && player.transform.position.x > 74f && player.transform.position.x < 80f)
             {
                 // Mario grande abre espacio sobre el borde antes de tomar carrera.
                 preparedFirstPit = true;
@@ -281,7 +519,7 @@ public sealed class Part1SmokeRunner : MonoBehaviour
             }
             // El laberinto tiene caminos inferiores. Un agente que subió a un hueco cerrado
             // debe retroceder y bajar, igual que el jugador, en lugar de saltar indefinidamente.
-            if (IsUpperRouteBlocked(player, bounds, lastProgress))
+            if (subsurface && IsUpperRouteBlocked(player, bounds, lastProgress))
             {
                 Debug.Log("PART1_ROUTE: retroceso físico hacia el pasillo inferior");
                 float recovery = Time.realtimeSinceStartup + 3f;
@@ -305,7 +543,7 @@ public sealed class Part1SmokeRunner : MonoBehaviour
                 refreshStar = Time.time + 5f;
                 Debug.Log($"PART1_ROUTE_PROGRESS: {player.transform.position}, grande={player.big}, suelo={movement.grounded}");
             }
-            if (destination < 200f && player.transform.position.x > 162f)
+            if (subsurface && player.transform.position.x > 162f)
                 FindFirstObjectByType<Pipe>().TryEnter(player);
             yield return null;
         }
@@ -317,13 +555,13 @@ public sealed class Part1SmokeRunner : MonoBehaviour
         }
     }
 
-    private IEnumerator ArriveAt(Player player, float x)
+    private IEnumerator ArriveAt(Player player, float x, bool keepJump = false)
     {
         PlayerMovement movement = player.movement;
         Rigidbody2D body = player.GetComponent<Rigidbody2D>();
-        movement.simulatedJump = movement.simulatedJumpPressed = false;
+        if (!keepJump) movement.simulatedJump = movement.simulatedJumpPressed = false;
         float deadline = Time.realtimeSinceStartup + 5f;
-        while (!player.dead && Time.realtimeSinceStartup < deadline)
+        while (player != null && !player.dead && !player.IsTransitioning && Time.realtimeSinceStartup < deadline)
         {
             float distance = x - player.transform.position.x;
             if (Mathf.Abs(distance) < 0.08f && Mathf.Abs(body.linearVelocity.x) < 0.5f) break;
@@ -333,6 +571,63 @@ public sealed class Part1SmokeRunner : MonoBehaviour
         }
         movement.simulatedAxis = 0f;
         yield return new WaitForSeconds(0.15f);
+    }
+
+    private IEnumerator CrossElevators(Player player)
+    {
+        // Esperar y apuntar al ascensor es necesario: avanzar siempre a la derecha
+        // puede dejar al agente bajo el borde del suelo, según la fase de la plataforma.
+        var movement = player.movement;
+        yield return ArriveAt(player, 137.1f);
+        float deadline = Time.realtimeSinceStartup + 3;
+        while (!movement.grounded && !player.dead && Time.realtimeSinceStartup < deadline) yield return null;
+        player.Starpower();
+        deadline = Time.realtimeSinceStartup + 10;
+        while (!player.dead && Time.realtimeSinceStartup < deadline && !FindObjectsByType<MovingPlatform>(FindObjectsSortMode.None)
+            .Any(p => !p.ascending && p.transform.position.y > 5.5f && p.transform.position.y < 6.5f)) yield return null;
+        movement.simulatedJump = movement.simulatedJumpPressed = true;
+        yield return ArriveAt(player, 141, true);
+        movement.simulatedJump = false;
+        deadline = Time.realtimeSinceStartup + 3;
+        while (!movement.grounded && !player.dead && Time.realtimeSinceStartup < deadline) yield return null;
+        Debug.Log("PART1_ROUTE: sobre el ascensor descendente " + player.transform.position);
+        movement.simulatedAxis = 1;
+        deadline = Time.realtimeSinceStartup + 2;
+        while (player.transform.position.x < 142.3f && !player.dead && Time.realtimeSinceStartup < deadline) yield return null;
+        movement.simulatedAxis = 1; movement.simulatedJump = movement.simulatedJumpPressed = true;
+        yield return new WaitForSeconds(.9f);
+        yield return ArriveAt(player, 151.7f);
+        if (player.dead) yield break;
+        deadline = Time.realtimeSinceStartup + 3;
+        while (!movement.grounded && !player.dead && Time.realtimeSinceStartup < deadline) yield return null;
+        // Subir cuando la plataforma ascendente pasa por la altura del suelo.
+        deadline = Time.realtimeSinceStartup + 10;
+        MovingPlatform platform = null;
+        while (Time.realtimeSinceStartup < deadline)
+        {
+            platform = FindObjectsByType<MovingPlatform>(FindObjectsSortMode.None)
+                .FirstOrDefault(p => p.ascending && p.transform.position.y > 1.3f && p.transform.position.y < 2.4f);
+            if (platform != null) break;
+            player.Starpower();
+            yield return null;
+        }
+        movement.simulatedAxis = 1; movement.simulatedJump = movement.simulatedJumpPressed = true;
+        yield return ArriveAt(player, 156, true);
+        movement.simulatedJump = false;
+        // Frenar sobre la plataforma y dejarla ganar la altura del último tramo.
+        deadline = Time.realtimeSinceStartup + 6;
+        while (!player.dead && (player.transform.position.y < 9.5f || !movement.grounded) && Time.realtimeSinceStartup < deadline)
+        {
+            float delta = 156 - player.transform.position.x;
+            movement.simulatedAxis = Mathf.Clamp(delta, -.4f, .4f);
+            player.Starpower();
+            yield return null;
+        }
+        movement.simulatedAxis = 1;
+        movement.simulatedJump = movement.simulatedJumpPressed = false;
+        deadline = Time.realtimeSinceStartup + 4;
+        while (!player.dead && player.transform.position.x < 160.7f && Time.realtimeSinceStartup < deadline) yield return null;
+        Debug.Log("PART1_ROUTE: cruce de ascensores con espera y salto físico");
     }
 
     private static bool IsUpperRouteBlocked(Player player, Bounds bounds, float lastProgress)
@@ -354,8 +649,9 @@ public sealed class Part1SmokeRunner : MonoBehaviour
         Mario.transform.position = position;
         Mario.GetComponent<Rigidbody2D>().position = position;
         Camera.main.GetComponent<SideScrollingCamera>().SetRegion(Game.stage == 2 && position.x < 200, 6.5f,
-            Game.stage == 2 && position.x < 200 ? new Vector2(0, 171) : Game.stage == 2 ? new Vector2(210, 250) : new Vector2(0, 227),
-            Game.stage == 2 && position.x < 200 ? Color.black : new Color(0.36f, 0.58f, 0.99f), true);
+            Game.stage == 3 ? (position.x < 75 ? new Vector2(0, 72) : new Vector2(78, 114)) : Game.stage == 2 && position.x < 200 ? new Vector2(0, 171) : Game.stage == 2 ? new Vector2(210, 250) : new Vector2(0, 227),
+            Game.stage == 3 && position.x < 75 ? new Color(.03f, .27f, .43f) : Game.stage == 2 && position.x < 200 ? Color.black : new Color(0.36f, 0.58f, 0.99f), true);
+        Mario.movement.SetSwimming(Game.stage == 3 && position.x < 75);
         Physics2D.SyncTransforms();
         Mario.SetTransitioning(false);
     }
@@ -366,6 +662,24 @@ public sealed class Part1SmokeRunner : MonoBehaviour
         yield return new WaitForEndOfFrame();
         // El modo batch puede omitir el framebuffer de la ventana oculta; renderizar la cámara explícitamente.
         Camera camera = Camera.main;
+        GameOverMenu menu = FindFirstObjectByType<GameOverMenu>();
+        MainMenuController home = FindFirstObjectByType<MainMenuController>();
+        Canvas menuCanvas = menu != null ? menu.GetComponent<Canvas>() : home != null ? home.GetComponent<Canvas>() : null;
+        if (menuCanvas != null)
+        {
+            menuCanvas.renderMode = RenderMode.ScreenSpaceCamera;
+            menuCanvas.worldCamera = camera;
+            menuCanvas.planeDistance = 1f;
+            menuCanvas.enabled = false;
+            menuCanvas.enabled = true;
+            foreach (Graphic graphic in menuCanvas.GetComponentsInChildren<Graphic>())
+            {
+                graphic.enabled = false;
+                graphic.enabled = true;
+                graphic.SetAllDirty();
+            }
+            Canvas.ForceUpdateCanvases();
+        }
         RenderTexture target = new RenderTexture(1280, 720, 24);
         RenderTexture previous = RenderTexture.active;
         camera.targetTexture = target;
@@ -378,6 +692,7 @@ public sealed class Part1SmokeRunner : MonoBehaviour
         Check(image.GetPixels32().Count(c => c.r > 10 || c.g > 10 || c.b > 10) > 1000, "Escenario visible: " + name);
         Check(image.GetPixels32().Count(c => c.r > 240 && c.g < 10 && c.b > 240) < 100, "Materiales válidos: " + name);
         camera.targetTexture = null;
+        if (menuCanvas != null) { menuCanvas.renderMode = RenderMode.ScreenSpaceOverlay; menuCanvas.worldCamera = null; }
         RenderTexture.active = previous;
         target.Release();
         Destroy(target);
