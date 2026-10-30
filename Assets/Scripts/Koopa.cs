@@ -1,5 +1,6 @@
 using UnityEngine;
 
+/// <summary>Alterna entre caminar, caparazón inmóvil, caparazón lanzado y derrota.</summary>
 public class Koopa : MonoBehaviour
 {
     public Sprite shellSprite;
@@ -7,14 +8,15 @@ public class Koopa : MonoBehaviour
 
     private bool shelled;
     private bool pushed;
+    private bool defeated;
 
     private void OnCollisionEnter2D(Collision2D collision)
     {
-        if (!shelled && collision.gameObject.CompareTag("Player") && collision.gameObject.TryGetComponent(out Player player))
+        if (!defeated && !shelled && collision.gameObject.CompareTag("Player") && collision.gameObject.TryGetComponent(out Player player))
         {
             if (player.starpower) {
                 Hit();
-            } else if (collision.transform.DotTest(transform, Vector2.down)) {
+            } else if (collision.HasContactNormal(Vector2.down)) {
                 EnterShell();
             }  else {
                 player.Hit();
@@ -24,6 +26,7 @@ public class Koopa : MonoBehaviour
 
     private void OnTriggerEnter2D(Collider2D other)
     {
+        if (defeated) return;
         if (shelled && other.CompareTag("Player") && other.TryGetComponent(out Player player))
         {
             if (!pushed)
@@ -49,28 +52,32 @@ public class Koopa : MonoBehaviour
     private void EnterShell()
     {
         shelled = true;
+        GameAudio.Instance?.Play(SoundEffect.Stomp);
 
         GetComponent<SpriteRenderer>().sprite = shellSprite;
         GetComponent<AnimatedSprite>().enabled = false;
-        GetComponent<EntityMovement>().enabled = false;
+        GetComponent<EntityMovement>().SetMovementAllowed(false);
     }
 
     private void PushShell(Vector2 direction)
     {
         pushed = true;
+        GameAudio.Instance?.Play(SoundEffect.Kick);
 
-        GetComponent<Rigidbody2D>().isKinematic = false;
+        GetComponent<Rigidbody2D>().bodyType = RigidbodyType2D.Dynamic;
 
         EntityMovement movement = GetComponent<EntityMovement>();
         movement.direction = direction.normalized;
         movement.speed = shellSpeed;
-        movement.enabled = true;
+        movement.SetMovementAllowed(true);
 
         gameObject.layer = LayerMask.NameToLayer("Shell");
     }
 
     private void Hit()
     {
+        if (defeated) return;
+        defeated = true;
         GetComponent<AnimatedSprite>().enabled = false;
         GetComponent<DeathAnimation>().enabled = true;
         Destroy(gameObject, 3f);

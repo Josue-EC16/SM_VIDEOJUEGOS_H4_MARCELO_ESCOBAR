@@ -1,5 +1,6 @@
 using UnityEngine;
 
+/// <summary>Intercambia fotogramas; cancela su temporizador cuando se desactiva.</summary>
 [RequireComponent(typeof(SpriteRenderer))]
 public class AnimatedSprite : MonoBehaviour
 {

@@ -4,13 +4,21 @@ public static class Extensions
 {
     private static LayerMask layerMask = LayerMask.GetMask("Default");
 
+    /// <summary>Usa la superficie real del contacto, no la posición del centro del bloque.</summary>
+    public static bool HasContactNormal(this Collision2D collision, Vector2 direction, float minimumDot = 0.5f)
+    {
+        for (int i = 0; i < collision.contactCount; i++)
+            if (Vector2.Dot(collision.GetContact(i).normal, direction) > minimumDot) return true;
+        return false;
+    }
+
     // Checks if the rigidbody is colliding with an object in a given direction.
     // For example, if you want to check if the player is touching the ground,
     // you can pass Vector2.down. If you want to check if the player is running
     // into a wall, you can pass Vector2.right or Vector2.left.
     public static bool Raycast(this Rigidbody2D rigidbody, Vector2 direction)
     {
-        if (rigidbody.isKinematic) {
+        if (rigidbody.bodyType == RigidbodyType2D.Kinematic || direction.sqrMagnitude < 0.0001f) {
             return false;
         }
 

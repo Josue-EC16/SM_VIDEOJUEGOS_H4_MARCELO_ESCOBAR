@@ -1,6 +1,7 @@
 using System.Collections;
 using UnityEngine;
 
+/// <summary>Desactiva el control y anima una trayectoria propia de muerte.</summary>
 public class DeathAnimation : MonoBehaviour
 {
     public SpriteRenderer spriteRenderer;
@@ -42,7 +43,7 @@ public class DeathAnimation : MonoBehaviour
         }
 
         if (TryGetComponent(out Rigidbody2D rigidbody)) {
-            rigidbody.isKinematic = true;
+            rigidbody.bodyType = RigidbodyType2D.Kinematic;
         }
 
         if (TryGetComponent(out PlayerMovement playerMovement)) {
@@ -50,7 +51,7 @@ public class DeathAnimation : MonoBehaviour
         }
 
         if (TryGetComponent(out EntityMovement entityMovement)) {
-            entityMovement.enabled = false;
+            entityMovement.SetMovementAllowed(false);
         }
     }
 

@@ -1,6 +1,7 @@
 using System.Collections;
 using UnityEngine;
 
+/// <summary>Cuenta una moneda al aparecer y muestra su salto sobre el bloque.</summary>
 public class BlockCoin : MonoBehaviour
 {
     private void Start()

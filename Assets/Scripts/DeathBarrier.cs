@@ -1,5 +1,6 @@
 using UnityEngine;
 
+/// <summary>Resuelve las caídas y retira objetos, sin destruir los ascensores reciclables.</summary>
 [RequireComponent(typeof(BoxCollider2D))]
 public class DeathBarrier : MonoBehaviour
 {
@@ -7,12 +8,12 @@ public class DeathBarrier : MonoBehaviour
     {
         if (other.CompareTag("Player"))
         {
-            other.gameObject.SetActive(false);
-            GameManager.Instance.ResetLevel(3f);
+            if (other.TryGetComponent(out Player player)) player.Fall();
         }
         else
         {
-            Destroy(other.gameObject);
+            // Los ascensores se reciclan por debajo del escenario.
+            if (other.GetComponent<MovingPlatform>() == null) Destroy(other.gameObject);
         }
     }
 

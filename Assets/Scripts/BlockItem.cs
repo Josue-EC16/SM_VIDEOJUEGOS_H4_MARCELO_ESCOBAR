@@ -1,6 +1,7 @@
 using System.Collections;
 using UnityEngine;
 
+/// <summary>Oculta física y recogida hasta completar la salida del objeto desde el bloque.</summary>
 public class BlockItem : MonoBehaviour
 {
     private void Start()
@@ -14,8 +15,11 @@ public class BlockItem : MonoBehaviour
         CircleCollider2D physicsCollider = GetComponent<CircleCollider2D>();
         BoxCollider2D triggerCollider = GetComponent<BoxCollider2D>();
         SpriteRenderer spriteRenderer = GetComponent<SpriteRenderer>();
+        EntityMovement movement = GetComponent<EntityMovement>();
+        if (movement != null) movement.SetMovementAllowed(false);
+        GameAudio.Instance?.Play(SoundEffect.Item);
 
-        rigidbody.isKinematic = true;
+        rigidbody.bodyType = RigidbodyType2D.Kinematic;
         physicsCollider.enabled = false;
         triggerCollider.enabled = false;
         spriteRenderer.enabled = false;
@@ -40,9 +44,12 @@ public class BlockItem : MonoBehaviour
             yield return null;
         }
 
-        rigidbody.isKinematic = false;
+        // Fijar el destino evita depender de la duración del último fotograma.
+        transform.position = endPosition;
+        rigidbody.bodyType = RigidbodyType2D.Dynamic;
         physicsCollider.enabled = true;
         triggerCollider.enabled = true;
+        if (movement != null) movement.SetMovementAllowed(true);
     }
 
 }

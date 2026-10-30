@@ -1,5 +1,6 @@
 using UnityEngine;
 
+/// <summary>Selecciona la animación visual sin decidir el tamaño ni la salud de Mario.</summary>
 [RequireComponent(typeof(SpriteRenderer))]
 public class PlayerSpriteRenderer : MonoBehaviour
 {
@@ -18,9 +19,9 @@ public class PlayerSpriteRenderer : MonoBehaviour
 
     private void LateUpdate()
     {
-        run.enabled = movement.running;
+        run.enabled = movement.running && movement.grounded && !movement.jumping;
 
-        if (movement.jumping) {
+        if (movement.jumping || movement.falling) {
             spriteRenderer.sprite = jump;
         } else if (movement.sliding) {
             spriteRenderer.sprite = slide;

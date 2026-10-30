@@ -1,5 +1,6 @@
 using UnityEngine;
 
+/// <summary>Aplica la recompensa al jugador y elimina el objeto recogido.</summary>
 public class PowerUp : MonoBehaviour
 {
     public enum Type
