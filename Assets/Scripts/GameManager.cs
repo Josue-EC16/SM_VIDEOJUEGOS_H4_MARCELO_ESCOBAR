@@ -10,6 +10,7 @@ public class GameManager : MonoBehaviour
     public int world { get; private set; } = 1;
     public int stage { get; private set; } = 1;
     public int lives { get; private set; } = 3;
+    public event System.Action<int> LivesChanged;
     public int coins { get; private set; }
     public bool IsTransitioning { get; private set; }
     public bool IsResetPending { get; private set; }
@@ -17,6 +18,7 @@ public class GameManager : MonoBehaviour
     public bool IsMainMenu => SceneManager.GetActiveScene().name == "MainMenu";
     public bool CompletedRun { get; private set; }
     private SceneTransition transition;
+    private LivesCounter livesCounter;
     private PlayerState pendingState;
     private bool restoreState;
 
@@ -27,6 +29,7 @@ public class GameManager : MonoBehaviour
         DontDestroyOnLoad(gameObject);
         transition = gameObject.AddComponent<SceneTransition>();
         if (GetComponent<GameAudio>() == null) gameObject.AddComponent<GameAudio>();
+        livesCounter = gameObject.AddComponent<LivesCounter>();
         SceneManager.sceneLoaded += OnSceneLoaded;
     }
 
@@ -50,6 +53,7 @@ public class GameManager : MonoBehaviour
     private void ConfigureScene()
     {
         LevelSettings settings = FindFirstObjectByType<LevelSettings>();
+        livesCounter.SetVisible(settings != null);
         if (settings != null) { world = settings.world; stage = settings.stage; settings.Apply(); }
         if (IsGameOver) GameAudio.Instance?.StopMusic();
         else if (IsMainMenu) GameAudio.Instance?.SetTheme(MusicTheme.Menu);
@@ -69,7 +73,7 @@ public class GameManager : MonoBehaviour
         CancelInvoke(nameof(ResetLevel));
         IsResetPending = false;
         CompletedRun = false;
-        lives = 3;
+        SetLives(3);
         coins = 0;
         BeginLoad(1, level, default);
     }
@@ -161,7 +165,7 @@ public class GameManager : MonoBehaviour
         if (IsTransitioning) return;
         CancelInvoke(nameof(ResetLevel));
         IsResetPending = false;
-        lives--;
+        SetLives(lives - 1);
         if (lives <= 0) GameOver();
         else BeginLoad(world, stage, default);
     }
@@ -175,7 +179,14 @@ public class GameManager : MonoBehaviour
 
     public void AddLife()
     {
-        lives++;
+        SetLives(lives + 1);
         GameAudio.Instance?.Play(SoundEffect.ExtraLife);
+    }
+
+    // Un único punto de escritura mantiene el contador sincronizado con la partida.
+    private void SetLives(int value)
+    {
+        lives = Mathf.Max(0, value);
+        LivesChanged?.Invoke(lives);
     }
 }

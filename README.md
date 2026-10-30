@@ -19,6 +19,11 @@ Al agotar las vidas aparece **Game Over**, con únicamente **Volver a intentar**
 (reinicia en `1-1`, con tres vidas, cero monedas y Mario pequeño) y **Salir**.
 Las primeras columnas de bronce de `1-2` forman un tramo continuo.
 
+El marcador **VIDAS** aparece en la esquina superior izquierda de los tres niveles.
+Se actualiza al perder o ganar vidas, conserva el valor entre niveles y vuelve a
+**3** al empezar una partida o pulsar **Volver a intentar**. Game Over aparece al
+agotar las vidas. El marcador se oculta en los menús.
+
 ## Menú y recorrido completo
 
 Abre `Assets/Scenes/MainMenu.unity` para empezar desde el menú. También es la

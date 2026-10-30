@@ -9,7 +9,7 @@ using UnityEngine.SceneManagement;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-/// <summary>Pruebas optativas del ejecutable: sólo se activan con -part1Smoke.</summary>
+/// <summary>Pruebas optativas del ejecutable de desarrollo, activadas mediante argumentos.</summary>
 public sealed class Part1SmokeRunner : MonoBehaviour
 {
     private readonly List<string> results = new List<string>();
@@ -19,7 +19,8 @@ public sealed class Part1SmokeRunner : MonoBehaviour
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void Bootstrap()
     {
-        if (!Environment.GetCommandLineArgs().Contains("-part1Smoke") && !Environment.GetCommandLineArgs().Contains("-menuQuitSmoke") && !Environment.GetCommandLineArgs().Contains("-routeSmoke") && !Environment.GetCommandLineArgs().Contains("-aquaticSmoke")) return;
+        string[] modes = { "-part1Smoke", "-menuQuitSmoke", "-routeSmoke", "-aquaticSmoke", "-livesSmoke" };
+        if (!Environment.GetCommandLineArgs().Any(argument => modes.Contains(argument))) return;
         Application.SetStackTraceLogType(LogType.Log, StackTraceLogType.None);
         GameObject obj = new GameObject("Verificación automática parte 1");
         DontDestroyOnLoad(obj);
@@ -35,6 +36,7 @@ public sealed class Part1SmokeRunner : MonoBehaviour
         yield return null;
         bool menuQuit = Environment.GetCommandLineArgs().Contains("-menuQuitSmoke");
         if (menuQuit) { yield return null; Check(Game.IsMainMenu, "Salir se prueba desde el menú inicial"); }
+        else if (Environment.GetCommandLineArgs().Contains("-livesSmoke")) yield return VerifyLivesCounter();
         else if (Environment.GetCommandLineArgs().Contains("-aquaticSmoke"))
         {
             Game.StartGameAt(3); yield return WaitForLoad();
@@ -69,7 +71,8 @@ public sealed class Part1SmokeRunner : MonoBehaviour
             EventSystem.current.RaycastAll(exitPointer, hits);
             Check(hits.Any(h => h.gameObject == exitButton.gameObject), "Salir recibe el clic del ratón");
         }
-        string report = menuQuit ? "menu-quit-results.txt" : Environment.GetCommandLineArgs().Contains("-aquaticSmoke") ? "aquatic-results.txt"
+        string report = menuQuit ? "menu-quit-results.txt" : Environment.GetCommandLineArgs().Contains("-livesSmoke") ? "lives-results.txt"
+            : Environment.GetCommandLineArgs().Contains("-aquaticSmoke") ? "aquatic-results.txt"
             : Environment.GetCommandLineArgs().Contains("-routeSmoke") ? "route-results.txt" : "playmode-results.txt";
         File.WriteAllLines(Path.Combine(output, report), results);
         Debug.Log(failed ? "PART1_SMOKE_FAILED" : "PART1_SMOKE_OK");
@@ -122,6 +125,53 @@ public sealed class Part1SmokeRunner : MonoBehaviour
         while (Game.IsTransitioning && Time.realtimeSinceStartup < timeout) yield return null;
         Check(!Game.IsTransitioning, "La transición finaliza");
         yield return new WaitForFixedUpdate();
+    }
+
+    private IEnumerator VerifyLivesCounter()
+    {
+        LivesCounter counter = FindFirstObjectByType<LivesCounter>();
+        Text label = counter.GetComponentInChildren<Text>(true);
+        Check(Game.IsMainMenu && !label.isActiveAndEnabled, "El menú principal oculta el marcador");
+        for (int stage = 1; stage <= 3; stage++)
+        {
+            Game.StartGameAt(stage);
+            yield return WaitForLoad();
+            Check(label.isActiveAndEnabled && label.text == "VIDAS: 3", "Tres vidas visibles al empezar 1-" + stage);
+            yield return Capture("lives-level-" + stage);
+            Mario.Death();
+            yield return new WaitForSeconds(4);
+            yield return WaitForLoad();
+            Check(Game.stage == stage && Game.lives == 2 && label.text == "VIDAS: 2", "Morir descuenta una vida del marcador en 1-" + stage);
+            Game.AddLife();
+            Check(label.text == "VIDAS: 3", "Una vida extra actualiza el marcador en 1-" + stage);
+            for (int coin = 0; coin < 100; coin++) Game.AddCoin();
+            Check(Game.coins == 0 && label.text == "VIDAS: 4", "Cien monedas otorgan otra vida visible");
+            Game.LoadLevel(1, stage == 3 ? 1 : stage + 1);
+            yield return WaitForLoad();
+            Check(label.isActiveAndEnabled && label.text == "VIDAS: 4" && FindObjectsByType<LivesCounter>(FindObjectsSortMode.None).Length == 1,
+                "El cambio de nivel conserva cuatro vidas y un único marcador");
+            Game.ShowMainMenu();
+            yield return WaitForLoad();
+            Check(!label.isActiveAndEnabled, "El marcador vuelve a ocultarse en el menú");
+        }
+        Game.StartGameAt(3);
+        yield return WaitForLoad();
+        Check(label.text == "VIDAS: 3", "Empezar otra partida restablece tres vidas");
+        for (int remaining = 2; remaining >= 0; remaining--)
+        {
+            Mario.Death();
+            yield return new WaitForSeconds(4);
+            yield return WaitForLoad();
+            Check(Game.lives == remaining && label.text == "VIDAS: " + remaining, "Cuenta regresiva de vidas: " + remaining);
+        }
+        Check(Game.IsGameOver && !label.isActiveAndEnabled, "Cero vidas carga Game Over y oculta el marcador");
+        Submit(FindFirstObjectByType<GameOverMenu>().retryButton);
+        yield return WaitForLoad();
+        Check(Game.stage == 1 && label.isActiveAndEnabled && label.text == "VIDAS: 3", "Volver a intentar muestra tres vidas en 1-1");
+        yield return Capture("lives-retry");
+        Game.GameOver();
+        yield return WaitForLoad();
+        yield return null;
     }
 
     private IEnumerator Run()
@@ -662,10 +712,9 @@ public sealed class Part1SmokeRunner : MonoBehaviour
         yield return new WaitForEndOfFrame();
         // El modo batch puede omitir el framebuffer de la ventana oculta; renderizar la cámara explícitamente.
         Camera camera = Camera.main;
-        GameOverMenu menu = FindFirstObjectByType<GameOverMenu>();
-        MainMenuController home = FindFirstObjectByType<MainMenuController>();
-        Canvas menuCanvas = menu != null ? menu.GetComponent<Canvas>() : home != null ? home.GetComponent<Canvas>() : null;
-        if (menuCanvas != null)
+        Canvas[] overlays = FindObjectsByType<Canvas>(FindObjectsSortMode.None)
+            .Where(canvas => canvas.renderMode == RenderMode.ScreenSpaceOverlay && canvas.sortingOrder < 1000).ToArray();
+        foreach (Canvas menuCanvas in overlays)
         {
             menuCanvas.renderMode = RenderMode.ScreenSpaceCamera;
             menuCanvas.worldCamera = camera;
@@ -692,7 +741,7 @@ public sealed class Part1SmokeRunner : MonoBehaviour
         Check(image.GetPixels32().Count(c => c.r > 10 || c.g > 10 || c.b > 10) > 1000, "Escenario visible: " + name);
         Check(image.GetPixels32().Count(c => c.r > 240 && c.g < 10 && c.b > 240) < 100, "Materiales válidos: " + name);
         camera.targetTexture = null;
-        if (menuCanvas != null) { menuCanvas.renderMode = RenderMode.ScreenSpaceOverlay; menuCanvas.worldCamera = null; }
+        foreach (Canvas menuCanvas in overlays) { menuCanvas.renderMode = RenderMode.ScreenSpaceOverlay; menuCanvas.worldCamera = null; }
         RenderTexture.active = previous;
         target.Release();
         Destroy(target);
